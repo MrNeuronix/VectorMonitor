@@ -6,39 +6,230 @@
 #include <Wire.h> 
 #include <LiquidCrystal_I2C.h>
 #include <math.h>
- 
-SoftwareSerial BTserial(D3, D4, false, 255); // RX, TX
-LiquidCrystal_I2C lcd(0x27, 20, 4); 
+
+const float VERSION = 1.02;
 
 const long SerialBaudRate = 9600; 
 const long BtBaudRate = 9600; //38400; 
 
+// your battery capacity (in Ah)
 const float BATTERY_AH = 20;
 
+// HC-05 bluetooth adapter settings
+const int TX_BT = D3; // TX port
+const int RX_BT = D4; // RX port
+
+// 2004 LCD screen (20x4 with i2c adapter) settings
+const int SDA_LCD = D6; // SDA port
+const int SCL_LCD = D5; // SCL port
+
+SoftwareSerial BTserial(RX_BT, TX_BT, false, 255); // 255 - increased byte buffer for large data packet from controller
+LiquidCrystal_I2C lcd(0x27, 20, 4); 
+
+byte noData = 0;
 byte pindex = 0;
 byte data;
 byte prevData;
 byte packetData[255];
+boolean initialized = false;
 
 void setup() {
   Serial.begin(SerialBaudRate);  
   BTserial.begin(BtBaudRate);  
-  Wire.begin(D6, D7);
+  Wire.begin(SDA_LCD, SCL_LCD);
 
   lcd.init();
   lcd.backlight();                     
   lcd.home();
 
-  lcd.setCursor(2, 1);
-  lcd.print("Vector-M Monitor");
+  lcd.setCursor(3, 1);
+  lcd.print("Vector Monitor");
   lcd.setCursor(5, 2);
-  lcd.print("ver. 0.1");
+  lcd.print("ver. ");
+  lcd.print(float2s(VERSION));
 
   delay(2500);
 
   lcd.clear();
 
-  // voltage
+  lcd.setCursor(2, 1);
+  lcd.print("Waiting for data");
+}
+  
+void loop() {
+
+  // sending TrmRequest (request controller for data)
+  BTserial.write(-1);     // 0xff
+  BTserial.write(-1);     // 0xff
+  BTserial.write(1);      // data length
+  BTserial.write(113);    // command
+  BTserial.write(-115);   // packet crc
+  
+  delay(500);
+
+  data = BTserial.read();
+
+  if(data == 0xFF && prevData == 0xFF) {
+    // new packet detected
+    byte packetLength = BTserial.read();
+    byte packetType = BTserial.read();
+
+    // data packet (5)
+    if(packetType == 5) {
+      memset(packetData, 0, sizeof(packetData));
+      pindex = 0;
+
+      if(!initialized) {
+        setupScreen();
+        initialized = true;
+      }
+  
+      if(noData > 0) {
+        if(noData >= 10) {
+          setupScreen();
+        }
+        noData = 0;
+      }
+  
+      // reading response data packet
+      // packet structure described below code
+      while(pindex <= packetLength-1) {
+        packetData[pindex] = BTserial.read();
+        pindex++;
+      }
+    
+      float speedCurrent = packetData[185] + (packetData[186] << 8);
+      float batteryVoltage = ((float)(packetData[38] + (packetData[39] << 8)) / 10);
+      float contTemp = ((float)(packetData[32] + (packetData[33] << 8))) / 10;
+      float current = (((float)(packetData[20] + (packetData[21] << 8))) * 134) / 1000;
+      float ah = ((((float)((long)packetData[83]) + (((long)(packetData[84])) << 8) + (((long)(packetData[85])) << 16) + (((long)(packetData[86])) << 24)) / 36000) * 134) / 1000;
+      float ahRegen = ((((float)((long)packetData[87]) + (((long)(packetData[88])) << 8) + (((long)(packetData[89])) << 16) + (((long)(packetData[90])) << 24)) / 36000) * 134) / 1000;
+      float distance = round(100 * (((((long)packetData[158]) + (((long)packetData[159]) << 8) + (((long)packetData[160]) << 16) + (((long)packetData[161]) << 24)) / ((float)99.9)) / 1000)) / 100;
+      float odometer = round(100 * (((((long)packetData[26]) + (((long)packetData[27]) << 8) + (((long)packetData[28]) << 16) + (((long)packetData[29]) << 24)) / ((float)99.9)) / 1000)) / 100;
+  
+      // battery level icon
+      batterylevel(0, 0, abs(ah - ahRegen));
+  
+      // battegy voltage
+      lcd.setCursor(2, 0);
+      lcd.print(float2s(batteryVoltage));
+  
+      // speed
+      lcd.setCursor(10, 0);
+      if(speedCurrent < 100) {
+        if(speedCurrent < 10) {
+          lcd.print("  ");
+          lcd.print(float2s(speedCurrent));
+        } else {
+          lcd.print(" ");
+          lcd.print(float2s(speedCurrent));
+        }
+      } else {
+          lcd.print(float2s(speedCurrent));
+      }
+  
+      // power W
+      lcd.setCursor(0, 1);
+      float power = batteryVoltage * current;
+      if(power < 1000) {
+        if(power < 100) {
+          if(power < 10) {
+            lcd.print("   ");
+            lcd.print(float2s(power));
+          } else {
+            lcd.print("  ");
+            lcd.print(float2s(power));
+          }
+        } else {
+            lcd.print(" ");
+            lcd.print(float2s(power));
+        }
+      } else {
+        lcd.print(float2s(power));
+      }
+  
+      // power A
+      lcd.setCursor(10, 1);
+      if(current < 100) {
+        if(current < 10) {
+          lcd.print("  ");
+          lcd.print(float2s(current));
+        } else {
+          lcd.print(" ");
+          lcd.print(float2s(current));
+        }
+      } else {
+          lcd.print(float2s(current));
+      }
+  
+      // power consumed
+      lcd.setCursor(2, 2);
+      if(ah < 10) {
+        lcd.print(" ");
+        lcd.print(float2s(ah));
+      } else {
+        lcd.print(float2s(ah));
+      }
+  
+      // power regen
+      lcd.setCursor(11, 2);
+      if(ahRegen < 10) {
+        lcd.print(" ");
+        lcd.print(float2s(ahRegen));
+      } else {
+        lcd.print(float2s(ahRegen));
+      }
+  
+      // temperature
+      lcd.setCursor(2, 3);
+      if(contTemp < 100) {
+        if(contTemp < 10) {
+          lcd.print("  ");
+          lcd.print(float2s(contTemp));
+        } else {
+          lcd.print(" ");
+          lcd.print(float2s(contTemp));
+        }
+      } else {
+          lcd.print(float2s(contTemp));
+      }
+  
+      // distance
+      lcd.setCursor(10, 3);
+      if(distance < 100) {
+        if(distance < 10) {
+          lcd.print("  ");
+          lcd.print(float2s(distance));
+        } else {
+          lcd.print(" ");
+          lcd.print(float2s(distance));
+        }
+      } else {
+          lcd.print(float2s(distance));
+      }
+    } else {
+      if(noData >= 10) {
+        lcd.clear();
+        lcd.home();
+  
+        lcd.setCursor(2, 1);
+        lcd.print("Wating for data");
+        lcd.setCursor(5, 2);
+        lcd.print("Retry: ");
+        lcd.print(noData);
+      }
+      noData++;
+    }
+  }
+  
+  prevData = data;     
+}
+
+void setupScreen() {
+  lcd.clear();
+  lcd.home();
+  
+    // voltage
   lcd.setCursor(2, 0);
   lcd.print("00.00");
   lcd.setCursor(7, 0);
@@ -89,145 +280,6 @@ void setup() {
   lcd.print("000.00");
   lcd.setCursor(17, 3);
   lcd.print("km");
-}
-  
-void loop() {
-
-  // sending TrmRequest (request controller for data)
-  BTserial.write(-1);     // 0xff
-  BTserial.write(-1);     // 0xff
-  BTserial.write(1);      // data length
-  BTserial.write(113);    // command
-  BTserial.write(-115);   // packet crc
-  
-  delay(500);
-  
-  BTserial.read(); // 0xff
-  BTserial.read(); // 0xff
-    
-  byte packetLength = BTserial.read();
-  byte packetType = BTserial.read();
-  
-  if(packetType == 5) {
-    memset(packetData, 0, sizeof(packetData));
-    pindex = 0;
-    
-    while(pindex <= packetLength-1) {
-      packetData[pindex] = BTserial.read();
-      pindex++;
-    }
-  
-    float speedCurrent = packetData[185] + (packetData[186] << 8);
-    float batteryVoltage = ((float)(packetData[38] + (packetData[39] << 8)) / 10);
-    float contTemp = ((float)(packetData[32] + (packetData[33] << 8))) / 10;
-    float current = (((float)(packetData[20] + (packetData[21] << 8))) * 134) / 1000;
-    float ah = ((((float)((long)packetData[83]) + (((long)(packetData[84])) << 8) + (((long)(packetData[85])) << 16) + (((long)(packetData[86])) << 24)) / 36000) * 134) / 1000;
-    float ahRegen = ((((float)((long)packetData[87]) + (((long)(packetData[88])) << 8) + (((long)(packetData[89])) << 16) + (((long)(packetData[90])) << 24)) / 36000) * 134) / 1000;
-    float distance = round(100 * (((((long)packetData[158]) + (((long)packetData[159]) << 8) + (((long)packetData[160]) << 16) + (((long)packetData[161]) << 24)) / ((float)99.9)) / 1000)) / 100;
-    float odometer = round(100 * (((((long)packetData[26]) + (((long)packetData[27]) << 8) + (((long)packetData[28]) << 16) + (((long)packetData[29]) << 24)) / ((float)99.9)) / 1000)) / 100;
-
-    // battery level icon
-    batterylevel(0, 0, abs(ah + ahRegen));
-
-    // battegy voltage
-    lcd.setCursor(2, 0);
-    lcd.print(float2s(batteryVoltage));
-
-    // speed
-    lcd.setCursor(10, 0);
-    if(speedCurrent < 100) {
-      if(speedCurrent < 10) {
-        lcd.print("  ");
-        lcd.print(float2s(speedCurrent));
-      } else {
-        lcd.print(" ");
-        lcd.print(float2s(speedCurrent));
-      }
-    } else {
-        lcd.print(float2s(speedCurrent));
-    }
-
-    // power W
-    lcd.setCursor(0, 1);
-    float power = batteryVoltage * current;
-    if(power < 1000) {
-      if(power < 100) {
-        if(power < 10) {
-          lcd.print("   ");
-          lcd.print(float2s(power));
-        } else {
-          lcd.print("  ");
-          lcd.print(float2s(power));
-        }
-      } else {
-          lcd.print(" ");
-          lcd.print(float2s(power));
-      }
-    } else {
-      lcd.print(float2s(power));
-    }
-
-    // power A
-    lcd.setCursor(10, 1);
-    if(current < 100) {
-      if(current < 10) {
-        lcd.print("  ");
-        lcd.print(float2s(current));
-      } else {
-        lcd.print(" ");
-        lcd.print(float2s(current));
-      }
-    } else {
-        lcd.print(float2s(current));
-    }
-
-    // power consumed
-    lcd.setCursor(2, 2);
-    if(ah < 10) {
-      lcd.print(" ");
-      lcd.print(float2s(ah));
-    } else {
-      lcd.print(float2s(ah));
-    }
-
-    // power regen
-    lcd.setCursor(11, 2);
-    if(ahRegen < 10) {
-      lcd.print(" ");
-      lcd.print(float2s(ahRegen));
-    } else {
-      lcd.print(float2s(ahRegen));
-    }
-
-    // temperature
-    lcd.setCursor(2, 3);
-    if(contTemp < 100) {
-      if(contTemp < 10) {
-        lcd.print("  ");
-        lcd.print(float2s(contTemp));
-      } else {
-        lcd.print(" ");
-        lcd.print(float2s(contTemp));
-      }
-    } else {
-        lcd.print(float2s(contTemp));
-    }
-
-    // distance
-    lcd.setCursor(10, 3);
-    if(distance < 100) {
-      if(distance < 10) {
-        lcd.print("  ");
-        lcd.print(float2s(distance));
-      } else {
-        lcd.print(" ");
-        lcd.print(float2s(distance));
-      }
-    } else {
-        lcd.print(float2s(distance));
-    }
-  }
-     
 }
 
 void batterylevel(int xpos, int ypos, float consumed)
