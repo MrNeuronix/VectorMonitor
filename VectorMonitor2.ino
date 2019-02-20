@@ -74,8 +74,6 @@ void setup(void)
       Serial.println("Write protected");
     }
 
-    delay ( 1000 );
-
     setSyncProvider(RTC.get); // the function to get the time from the RTC
     if(timeStatus() == timeSet) {
       Serial.println(" Sync Ok! ");
@@ -200,10 +198,12 @@ void loop(void) {
   }
     
   if(initialized) {
-    noData = noData + 1;
+    noData++;
   }
 
   delay(100);
+
+  refresh++;
   
   if(timeStatus() != timeSet) {
     Serial.println("RTC ERROR: SYNC!");
