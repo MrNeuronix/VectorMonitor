@@ -86,7 +86,7 @@ void setup(void)
 }
 
 void loop(void) {
-  if(refresh >= 120) {
+  if(refresh >= 120 && initialized) {
     setupScreen();
     refresh = 0;
   }
@@ -203,7 +203,9 @@ void loop(void) {
 
   delay(100);
 
-  refresh++;
+  if(initialized) {
+    refresh++;
+  }
   
   if(timeStatus() != timeSet) {
     Serial.println("RTC ERROR: SYNC!");
@@ -214,6 +216,7 @@ void setupScreen(void) {
     tft.fillScreen(BLACK);
   
     LastPercent = 0;
+    refresh = 0;
   
     drawScale();
 
@@ -232,6 +235,8 @@ void setupScreen(void) {
 
 void setupNoDataScreen(void) {
     tft.fillScreen(BLACK);
+
+    refresh = 0;
 
     tft.setCursor(170, 130);
     tft.setTextSize(4);
