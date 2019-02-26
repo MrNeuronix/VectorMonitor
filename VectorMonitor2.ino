@@ -13,6 +13,8 @@
 #define GREEN   0x07E0
 #define WHITE   0xFFFF
 #define GREY    0x8410
+#define YELLOW  0xffff00
+#define BLUE    0x2defff
 
 const int SerialBaudRate = 9600; 
 const int BtBaudRate = 9600; //38400;
@@ -34,10 +36,10 @@ const char date[20] = {};
 const char wt[5] = {};
 byte noData = 0;
 byte pindex = 0;
-byte data;
-byte prevData;
-byte packetData[250];
-byte refresh = 0;
+int data;
+int prevData;
+int packetData[255];
+
 boolean initialized = false;
 
 MCUFRIEND_kbv tft;
@@ -85,18 +87,8 @@ void setup(void)
     setupNoDataScreen();
 }
 
-void loop(void) {
-  if(refresh >= 120 && initialized) {
-    setupScreen();
-    refresh = 0;
-  }
-  
+void loop(void) {  
   showDate();
-
-  if (BTserial.overflow()) {
-   Serial.println("SoftwareSerial overflow!");
-   delay(400);
-  }
 
   // read and skip all buffer
   while(BTserial.available()) {
@@ -117,7 +109,6 @@ void loop(void) {
   
     if(data == 0xFF && prevData == 0xFF) {
       // new packet detected
-      Serial.println("New packet detected");
       byte packetLength = BTserial.read();
       byte packetType = BTserial.read();
   
@@ -126,7 +117,23 @@ void loop(void) {
         Serial.println("New data packet captured");
         memset(packetData, 0, sizeof(packetData));
         pindex = 0;
-  
+    
+        // reading response data packet
+        // packet structure described below code
+        while(pindex < packetLength-1) { // length = type byte + dataBytes[n]
+          packetData[pindex] = BTserial.read();
+          pindex++;
+        }
+
+        int crc = BTserial.read();
+        int calcCrc = calculateCRC(packetType, packetLength, packetData, crc);
+
+        if(crc != calcCrc) {
+          Serial.println("Bad packet.");
+          noData++;
+          continue;
+        }
+
         if(!initialized) {
           setupScreen();
           initialized = true;
@@ -135,15 +142,6 @@ void loop(void) {
         if(noData > 0) {
           noData = 0;
         }
-    
-        // reading response data packet
-        // packet structure described below code
-        while(pindex < packetLength) {
-          packetData[pindex] = BTserial.read();
-          pindex = pindex + 1;
-        }
-
-        byte crc = BTserial.read();
       
         float speedCurrent = packetData[185] + (packetData[186] << 8);
         float batteryVoltage = ((float)(packetData[38] + (packetData[39] << 8)) / 10);
@@ -153,39 +151,19 @@ void loop(void) {
         float ahRegen = ((((float)((long)packetData[87]) + (((long)(packetData[88])) << 8) + (((long)(packetData[89])) << 16) + (((long)(packetData[90])) << 24)) / 36000) * 134) / 1000;
         float distance = round(100 * (((((long)packetData[158]) + (((long)packetData[159]) << 8) + (((long)packetData[160]) << 16) + (((long)packetData[161]) << 24)) / ((float)99.9)) / 1000)) / 100;
         float odometer = round(100 * (((((long)packetData[26]) + (((long)packetData[27]) << 8) + (((long)packetData[28]) << 16) + (((long)packetData[29]) << 24)) / ((float)99.9)) / 1000)) / 100;
-
-        Serial.print("Length: ");
-        Serial.println(packetLength);
-        Serial.print("CRC: ");
-        Serial.println(crc);
-        Serial.print("SPEED: ");
-        Serial.println(abs(speedCurrent));
-        Serial.print("VOLTAGE: ");
-        Serial.println(batteryVoltage);
-        Serial.print("AH: ");
-        Serial.println(ah);
-        Serial.print("AHR: ");
-        Serial.println(ahRegen);
-        Serial.print("CTemp: ");
-        Serial.println(contTemp);
-
-        if(speedCurrent == -1) {
-          speedCurrent = 0;
-        }
   
-        showSpeed(speedCurrent);
-        showPower(abs(batteryVoltage * current));
+        showSpeed(abs(speedCurrent));
+        showPower(batteryVoltage * current);
+        showVoltage(batteryVoltage);
+        showAhConsumed(ah);
+        showAhRegen(ahRegen);
+        showCurrent(current);
+        showContTemp(contTemp);
+        showDistance(distance);
+        showOdo(odometer);
+        
         drawBar(abs(ah - ahRegen) / (BATTERY_CAPACITY / 100));
-
-        // read and skip all buffer
-        while(BTserial.available()) {
-          BTserial.read();
-        }
-
-        delay(100);
-      }
-      else {
-        Serial.println("Unknown packet type");
+      
       }
     }
         
@@ -202,21 +180,92 @@ void loop(void) {
   }
 
   delay(100);
+}
 
-  if(initialized) {
-    refresh++;
-  }
+byte calculateCRC(int type, int plength, int *data, int crc) {
+  unsigned int summ = type + plength;
   
-  if(timeStatus() != timeSet) {
-    Serial.println("RTC ERROR: SYNC!");
+  for (byte j = 0; j < (plength-1); j++) {
+    summ = summ + data[j];
   }
+  summ = ~summ;
+  
+  return (byte)summ;
+}
+
+void showDate() {
+  sprintf(date, "%02d-%02d-%04d %02d:%02d:%02d", day(), month(), year(), hour(), minute(), second());
+  showmsgXY(355, 15, 1, WHITE, NULL, String(date));
+}
+
+void showSpeed(int kmh) {
+  String km = "";
+  if(kmh > 99) {
+    km = String(99);
+  }
+  if(kmh < 10) {
+    km = " " + String(kmh);
+  } else {
+    km = String(kmh);
+  }
+  //tft.fillRect(30, 10, 140, 130,  BLACK);
+  showmsgXY(30, 30, 11, GREEN, NULL /*&FreeSevenSegNumFont*/, km);
+}
+
+void showPower(const int watt) {
+  String wt = "";
+  if(watt > 9999) {
+    wt = String(9999);
+  } else {
+    if(watt < 1000) {
+      if(watt < 100) {
+        if(watt < 10) {
+          wt = "   " + String(watt);
+        } else {
+          wt = "  " + String(watt);
+        }
+      } else {
+        wt = " " + String(watt);
+      }
+    } else {
+      wt = String(watt);
+    }
+  }
+  showmsgXY(280, 50, 5, YELLOW, NULL, wt);
+}
+
+void showVoltage(const float volt) {
+  showmsgXY(310, 150, 3, RED, NULL, String(volt));
+}
+
+void showCurrent(const float a) {
+  showmsgXY(310, 185, 3, GREY, NULL, String(a));
+}
+
+void showAhConsumed(const float ah) {
+  showmsgXY(130, 170, 3, BLUE, NULL, String(ah));
+}
+
+void showAhRegen(const float ah) {
+  showmsgXY(130, 210, 3, BLUE, NULL, String(ah));
+}
+
+void showContTemp(const float c) {
+  showmsgXY(320, 230, 3, BLUE, NULL, String(c));
+}
+
+void showDistance(const float km) {
+  showmsgXY(130, 280, 3, BLUE, NULL, String(km));
+}
+
+void showOdo(const float km) {
+  showmsgXY(330, 280, 3, BLUE, NULL, String(km));
 }
 
 void setupScreen(void) {
     tft.fillScreen(BLACK);
   
     LastPercent = 0;
-    refresh = 0;
   
     drawScale();
 
@@ -231,12 +280,58 @@ void setupScreen(void) {
     tft.setTextSize(2);
     tft.setTextColor(WHITE);
     tft.print("km/h");
+
+    // V label
+    tft.setCursor(410, 140);
+    tft.setTextSize(2);
+    tft.setTextColor(WHITE);
+    tft.print("volts");
+
+    // A label
+    tft.setCursor(410, 180);
+    tft.setTextSize(2);
+    tft.setTextColor(WHITE);
+    tft.print("amps");
+
+    // Ah label
+    tft.setCursor(230, 165);
+    tft.setTextSize(2);
+    tft.setTextColor(WHITE);
+    tft.print("Ah");
+
+    // Ah regen label
+    tft.setCursor(230, 205);
+    tft.setTextSize(2);
+    tft.setTextColor(WHITE);
+    tft.print("Ah");
+
+    // Temp contr label
+    tft.setCursor(420, 230);
+    tft.setTextSize(2);
+    tft.setTextColor(WHITE);
+    tft.print((char)247);
+    tft.print("C");
+
+    tft.drawFastHLine(0, 135, 480, WHITE);
+    tft.drawFastHLine(0, 265, 480, WHITE);
+    tft.drawFastVLine(280, 135, 130, WHITE);
+    tft.drawFastHLine(280, 220, 200, WHITE);
+
+    // Trip label
+    tft.setCursor(30, 280);
+    tft.setTextSize(3);
+    tft.setTextColor(WHITE);
+    tft.print("Trip:");
+
+    // Odo label
+    tft.setCursor(250, 280);
+    tft.setTextSize(3);
+    tft.setTextColor(WHITE);
+    tft.print("ODO:");
 }
 
 void setupNoDataScreen(void) {
     tft.fillScreen(BLACK);
-
-    refresh = 0;
 
     tft.setCursor(170, 130);
     tft.setTextSize(4);
@@ -247,27 +342,6 @@ void setupNoDataScreen(void) {
     tft.setTextSize(3);
     tft.setTextColor(WHITE);
     tft.print("Waiting for data");
-}
-
-char * float2s(float f) {
-  char result[] = "";
-  sprintf(result, "%.2f", f);
-  return result;
-}
-
-void showDate() {
-  sprintf(date, "%02d-%02d-%04d %02d:%02d:%02d", day(), month(), year(), hour(), minute(), second());
-  showmsgXY(355, 15, 1, WHITE, NULL, String(date));
-}
-
-void showSpeed(const int kmh) {
-  tft.fillRect(30, 10, 140, 130,  BLACK);
-  showmsgXY(30, 120, 2, GREEN, &FreeSevenSegNumFont, String(kmh));
-}
-
-void showPower(const float watt) {
-  sprintf(wt, "%04d", (int)watt);  
-  showmsgXY(280, 50, 5, GREY, NULL, String(wt));
 }
 
 void drawScale(){  
