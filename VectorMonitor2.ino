@@ -2,6 +2,7 @@
 // Special for ElectroTrasport.Ru
 // (c) 2018 Nikolay Viguro aka Neuronix
 
+#include <TimeLib.h>
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <MCUFRIEND_kbv.h>   // Hardware-specific library
 #include <DS1302RTC.h>
@@ -61,7 +62,7 @@ void setup(void)
 
     // set it for first launch
     //RTC.writeEN(true);
-    //setTime(22, 38, 00, 19, 2, 2019); // hh:mm:ss dd:mm:yyyy
+    //setTime(21, 01, 00, 26, 2, 2019); // hh:mm:ss dd:mm:yyyy
     //RTC.set(now());
 
     if (RTC.haltRTC()) {
@@ -109,6 +110,7 @@ void loop(void) {
   
     if(data == 0xFF && prevData == 0xFF) {
       // new packet detected
+      Serial.println(" new packet detected ");
       byte packetLength = BTserial.read();
       byte packetType = BTserial.read();
   
@@ -202,11 +204,12 @@ void showSpeed(int kmh) {
   String km = "";
   if(kmh > 99) {
     km = String(99);
-  }
-  if(kmh < 10) {
-    km = " " + String(kmh);
   } else {
-    km = String(kmh);
+    if(kmh < 10) {
+      km = " " + String(kmh);
+    } else {
+      km = String(kmh);
+    }
   }
   //tft.fillRect(30, 10, 140, 130,  BLACK);
   showmsgXY(30, 30, 11, GREEN, NULL /*&FreeSevenSegNumFont*/, km);
@@ -238,8 +241,20 @@ void showVoltage(const float volt) {
   showmsgXY(310, 150, 3, RED, NULL, String(volt));
 }
 
-void showCurrent(const float a) {
-  showmsgXY(310, 185, 3, GREY, NULL, String(a));
+void showCurrent(const int a) {
+  String am = "";
+
+  if(a < 100) {
+    if(a < 10) {
+      am = "  " + String(a);
+    } else {
+      am = " " + String(a);
+    }
+  } else {
+    am = String(a);
+  }
+ 
+  showmsgXY(325, 183, 3, GREY, NULL, am);
 }
 
 void showAhConsumed(const float ah) {
