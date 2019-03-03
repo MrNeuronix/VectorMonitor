@@ -6,6 +6,7 @@
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <MCUFRIEND_kbv.h>   // Hardware-specific library
 #include <DS1302RTC.h>
+#include <EEPROM.h>
 #include <SoftwareSerial.h>
 #include <FreeDefaultFonts.h>
 
@@ -40,8 +41,10 @@ byte pindex = 0;
 int data;
 int prevData;
 int packetData[255];
+byte voltageInROM;
 
 boolean initialized = false;
+boolean firstRun = true;
 
 MCUFRIEND_kbv tft;
 DS1302RTC RTC(RST_PIN, DAT_PIN, CLK_PIN);
@@ -51,6 +54,8 @@ void setup(void)
 {
     Serial.begin(SerialBaudRate);
     BTserial.begin(BtBaudRate);
+
+    voltageInROM = EEPROM.read(0);
     
     uint16_t ID = tft.readID();
     if (ID == 0xD3) ID = 0x9481;
@@ -66,22 +71,22 @@ void setup(void)
     //RTC.set(now());
 
     if (RTC.haltRTC()) {
-      Serial.println("Clock stopped");
+      Serial.println(F("Clock stopped"));
     } else {
-      Serial.println("Clock working!");
+      Serial.println(F("Clock working!"));
     }
     
     if (RTC.writeEN()) {
-      Serial.println("Write allowed.");
+      Serial.println(F("Write allowed."));
     } else {
-      Serial.println("Write protected");
+      Serial.println(F("Write protected"));
     }
 
     setSyncProvider(RTC.get); // the function to get the time from the RTC
     if(timeStatus() == timeSet) {
-      Serial.println(" Sync Ok! ");
+      Serial.println(F(" Sync Ok! "));
     } else {
-      Serial.println("SYNC FAIL!");
+      Serial.println(F("SYNC FAIL!"));
     }
 
     // interface
@@ -110,13 +115,13 @@ void loop(void) {
   
     if(data == 0xFF && prevData == 0xFF) {
       // new packet detected
-      Serial.println(" new packet detected ");
+      Serial.println(F(" new packet detected "));
       byte packetLength = BTserial.read();
       byte packetType = BTserial.read();
   
       // data packet (5)
       if(packetType == 5) {
-        Serial.println("New data packet captured");
+        Serial.println(F("New data packet captured"));
         memset(packetData, 0, sizeof(packetData));
         pindex = 0;
     
@@ -131,12 +136,57 @@ void loop(void) {
         int calcCrc = calculateCRC(packetType, packetLength, packetData, crc);
 
         if(crc != calcCrc) {
-          Serial.println("Bad packet.");
+          Serial.println(F("Bad packet"));
           noData++;
           continue;
         }
 
         if(!initialized) {
+          if(firstRun) {
+            firstRun = false; // do this check only once at startup
+            byte batteryVoltage = ((float)(packetData[38] + (packetData[39] << 8)) / 10);
+
+            Serial.print(F("Current voltage is: "));
+            Serial.println(batteryVoltage);
+            Serial.print(F("Remembered voltage is: "));
+            Serial.println(voltageInROM);
+  
+            // if previous remembered battery voltage lower than current value
+            // we suppose that the battery was recharged
+            // So we reset Ah counters and store new value in EEPROM
+            if(voltageInROM < batteryVoltage) {
+              Serial.print(F("Reseting Ah counters"));
+  
+              // send SEND_lock command for unlock controller
+              BTserial.write(-1);     // 0xff
+              BTserial.write(-1);     // 0xff
+              BTserial.write(1);      // data length
+              BTserial.write(245);    // command
+              BTserial.write(9);      // packet crc
+
+              delay(500);
+
+              // send SEND_ClearCurrentAH command
+              BTserial.write(-1);     // 0xff
+              BTserial.write(-1);     // 0xff
+              BTserial.write(1);      // data length
+              BTserial.write(108);    // command
+              BTserial.write(-110);   // packet crc
+
+              delay(500);
+
+              // send SEND_lock command for lock again
+              BTserial.write(-1);     // 0xff
+              BTserial.write(-1);     // 0xff
+              BTserial.write(1);      // data length
+              BTserial.write(245);    // command
+              BTserial.write(9);      // packet crc
+              
+              voltageInROM = batteryVoltage;
+              EEPROM.write(0, voltageInROM);
+            }
+          }
+          
           setupScreen();
           initialized = true;
         }
