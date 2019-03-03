@@ -55,6 +55,7 @@ void setup(void)
     Serial.begin(SerialBaudRate);
     BTserial.begin(BtBaudRate);
 
+    EEPROM.write(0, 0);
     voltageInROM = EEPROM.read(0);
     
     uint16_t ID = tft.readID();
@@ -114,8 +115,6 @@ void loop(void) {
     data = BTserial.read();
   
     if(data == 0xFF && prevData == 0xFF) {
-      // new packet detected
-      Serial.println(F(" new packet detected "));
       byte packetLength = BTserial.read();
       byte packetType = BTserial.read();
   
@@ -154,17 +153,29 @@ void loop(void) {
             // if previous remembered battery voltage lower than current value
             // we suppose that the battery was recharged
             // So we reset Ah counters and store new value in EEPROM
-            if(voltageInROM < batteryVoltage) {
-              Serial.print(F("Reseting Ah counters"));
+            if(voltageInROM < batteryVoltage || /* default value */ voltageInROM == 255) {
+              Serial.println(F("Reseting Ah counters"));
   
-              // send SEND_lock command for unlock controller
+              // send SEND_unlock command for unlock controller
               BTserial.write(-1);     // 0xff
               BTserial.write(-1);     // 0xff
-              BTserial.write(1);      // data length
-              BTserial.write(245);    // command
-              BTserial.write(9);      // packet crc
+              BTserial.write(13);      // data length
+              BTserial.write(243);    // command
+              BTserial.write(185);    // data
+              BTserial.write(211);    // data
+              BTserial.write(11);    // data
+              BTserial.write(193);    // data
+              BTserial.write(72);    // data
+              BTserial.write(95);    // data
+              BTserial.write(123);    // data
+              BTserial.write(19);    // data
+              BTserial.write(228);    // data
+              BTserial.write(117);    // data
+              BTserial.write(3);    // data
+              BTserial.write(55);    // data
+              BTserial.write(-33);      // packet crc
 
-              delay(500);
+              delay(1500);
 
               // send SEND_ClearCurrentAH command
               BTserial.write(-1);     // 0xff
@@ -173,7 +184,7 @@ void loop(void) {
               BTserial.write(108);    // command
               BTserial.write(-110);   // packet crc
 
-              delay(500);
+              delay(1000);
 
               // send SEND_lock command for lock again
               BTserial.write(-1);     // 0xff
