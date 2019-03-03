@@ -94,6 +94,13 @@ void setup(void)
     } else {
       Serial.println(F("SYNC FAIL!"));
     }
+    
+    // sending SEND_ResetDistance
+    BTserial.write(-1);     // 0xff
+    BTserial.write(-1);     // 0xff
+    BTserial.write(1);      // data length
+    BTserial.write(184);    // command
+    BTserial.write(70);   // packet crc
 
     // interface
     setupNoDataScreen();
