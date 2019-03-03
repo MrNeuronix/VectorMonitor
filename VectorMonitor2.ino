@@ -2,6 +2,8 @@
 // Special for ElectroTrasport.Ru
 // (c) 2018 Nikolay Viguro aka Neuronix
 
+// You *MUST* increase byte buffer in SoftwareSerial.h to 255 for large data packet from controller
+
 #include <TimeLib.h>
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <MCUFRIEND_kbv.h>   // Hardware-specific library
@@ -18,12 +20,15 @@
 #define YELLOW  0xffff00
 #define BLUE    0x2defff
 
+// Set your baud rate for serial and BT
 const int SerialBaudRate = 9600; 
 const int BtBaudRate = 9600; //38400;
 
+// Set this too :)
 const float BATTERY_CAPACITY = 60; // in Ah
 
 // RTC pins
+// set yours if different
 const byte RST_PIN = 13;
 const byte DAT_PIN = 10;
 const byte CLK_PIN = 19; // A5;  
@@ -55,7 +60,7 @@ void setup(void)
     Serial.begin(SerialBaudRate);
     BTserial.begin(BtBaudRate);
 
-    EEPROM.write(0, 0);
+    //EEPROM.write(0, 0);
     voltageInROM = EEPROM.read(0);
     
     uint16_t ID = tft.readID();
@@ -66,7 +71,7 @@ void setup(void)
     
     tft.fillScreen(BLACK);
 
-    // set it for first launch
+    // set it at first launch (for clock setup)
     //RTC.writeEN(true);
     //setTime(21, 01, 00, 26, 2, 2019); // hh:mm:ss dd:mm:yyyy
     //RTC.set(now());
@@ -157,10 +162,10 @@ void loop(void) {
               Serial.println(F("Reseting Ah counters"));
   
               // send SEND_unlock command for unlock controller
-              BTserial.write(-1);     // 0xff
-              BTserial.write(-1);     // 0xff
+              BTserial.write(-1);      // 0xff
+              BTserial.write(-1);      // 0xff
               BTserial.write(13);      // data length
-              BTserial.write(243);    // command
+              BTserial.write(243);     // command
               BTserial.write(0x37);    // data
               BTserial.write(0xac);    // data
               BTserial.write(0x2b);    // data
@@ -175,7 +180,7 @@ void loop(void) {
               BTserial.write(0xaa);    // data
               BTserial.write(38);      // packet crc
 
-              delay(1500);
+              delay(1000);
 
               // send SEND_ClearCurrentAH command
               BTserial.write(-1);     // 0xff
