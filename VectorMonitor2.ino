@@ -161,19 +161,19 @@ void loop(void) {
               BTserial.write(-1);     // 0xff
               BTserial.write(13);      // data length
               BTserial.write(243);    // command
-              BTserial.write(185);    // data
-              BTserial.write(211);    // data
-              BTserial.write(11);    // data
-              BTserial.write(193);    // data
-              BTserial.write(72);    // data
-              BTserial.write(95);    // data
-              BTserial.write(123);    // data
-              BTserial.write(19);    // data
-              BTserial.write(228);    // data
-              BTserial.write(117);    // data
-              BTserial.write(3);    // data
-              BTserial.write(55);    // data
-              BTserial.write(-33);      // packet crc
+              BTserial.write(0x37);    // data
+              BTserial.write(0xac);    // data
+              BTserial.write(0x2b);    // data
+              BTserial.write(0x33);    // data
+              BTserial.write(0xf1);    // data
+              BTserial.write(0x91);    // data
+              BTserial.write(0x7a);    // data
+              BTserial.write(0xb0);    // data
+              BTserial.write(0xec);    // data
+              BTserial.write(0x46);    // data
+              BTserial.write(0x10);    // data
+              BTserial.write(0xaa);    // data
+              BTserial.write(38);      // packet crc
 
               delay(1500);
 
