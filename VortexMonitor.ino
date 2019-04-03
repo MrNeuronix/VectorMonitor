@@ -319,11 +319,11 @@ void loop(void) {
         labels.tempEngine.setText(tempEngine);
 
         static char ah[4];
-        dtostrf(abs(currentData.ah), 5, 1, ah);
+        dtostrf(fabs(currentData.ah), 5, 1, ah);
         labels.ah.setText(ah);
 
         static char ahRegen[4];
-        dtostrf(abs(currentData.ahRegen), 5, 1, ahRegen);
+        dtostrf(fabs(currentData.ahRegen), 5, 1, ahRegen);
         labels.ahRegen.setText(ahRegen);
 
         static char distance[6];
@@ -346,7 +346,7 @@ void loop(void) {
           labels.power.setText("----");
         }
 
-        labels.ahBar.setValue(100 - (abs(ah - ahRegen) / (BATTERY_CAPACITY / 100)));
+        labels.ahBar.setValue(100 - (fabs(ah - ahRegen) / (BATTERY_CAPACITY / 100)));
       }
     }
         
