@@ -82,6 +82,7 @@ typedef Label Label;
 boolean initialized = false;
 boolean firstRun = true;
 boolean regen = false;
+boolean controllerLocked = true;
 
 DS1302RTC RTC(RST_PIN, DAT_PIN, CLK_PIN);
 HardwareSerial BTserial(1);
@@ -175,14 +176,11 @@ void setup(void)
     server.onNotFound(notFound);
     server.begin();
 
-    // sending SEND_ResetDistance
-    //BTserial.write(-1);     // 0xff
-    //BTserial.write(-1);     // 0xff
-    //BTserial.write(1);      // data length
-    //BTserial.write(184);    // command
-    //BTserial.write(70);   // packet crc
+    labels.status.setText("Reseting trip...");
 
-    labels.status.setText("Establishing bluetooth connection...");
+    sendResetTrip();
+
+    labels.status.setText("Waiting for data packet...");
 }
 
 void notFound(AsyncWebServerRequest *request) {
@@ -252,31 +250,10 @@ void loop(void) {
             // So we reset Ah counters and store new value in EEPROM
             if(voltageInROM < batteryVoltage) {
               Serial.println(F("Reseting Ah counters"));
-  
-              // send SEND_lock command for unlock controller
-              BTserial.write(-1);     // 0xff
-              BTserial.write(-1);     // 0xff
-              BTserial.write(1);      // data length
-              BTserial.write(245);    // command
-              BTserial.write(9);      // packet crc
-
-              delay(200);
-
-              // send SEND_ClearCurrentAH command
-              BTserial.write(-1);     // 0xff
-              BTserial.write(-1);     // 0xff
-              BTserial.write(1);      // data length
-              BTserial.write(108);    // command
-              BTserial.write(-110);   // packet crc
-
-              delay(200);
-
-              // send SEND_lock command for lock again
-              BTserial.write(-1);     // 0xff
-              BTserial.write(-1);     // 0xff
-              BTserial.write(1);      // data length
-              BTserial.write(245);    // command
-              BTserial.write(9);      // packet crc
+              labels.status.setText("Reseting Ah counters...");
+              
+              delay(500);
+              sendResetAh();
             }
 
               voltageInROM = batteryVoltage;
@@ -396,6 +373,123 @@ byte calculateCRC(int type, int plength, int *data, int crc) {
   summ = ~summ;
   
   return (byte)summ;
+}
+
+void sendUnlock(void) {
+  // send SEND_unlock command for unlock controller
+  BTserial.write(-1);      // 0xff
+  BTserial.write(-1);      // 0xff
+  BTserial.write(13);      // data length
+  BTserial.write(243);     // command
+  BTserial.write(0x37);    // data
+  BTserial.write(0xac);    // data
+  BTserial.write(0x2b);    // data
+  BTserial.write(0x33);    // data
+  BTserial.write(0xf1);    // data
+  BTserial.write(0x91);    // data
+  BTserial.write(0x7a);    // data
+  BTserial.write(0xb0);    // data
+  BTserial.write(0xec);    // data
+  BTserial.write(0x46);    // data
+  BTserial.write(0x10);    // data
+  BTserial.write(0xaa);    // data
+  BTserial.write(38);      // packet crc 
+}
+
+void sendLock(void) {
+  // send SEND_lock command for lock again
+  BTserial.write(-1);     // 0xff
+  BTserial.write(-1);     // 0xff
+  BTserial.write(1);      // data length
+  BTserial.write(245);    // command
+  BTserial.write(9);      // packet crc  
+}
+
+void sendSaveSettings(void) {
+  // sending SEND_ProgrammOptions
+  BTserial.write(-1);     // 0xff
+  BTserial.write(-1);     // 0xff
+  BTserial.write(1);      // data length
+  BTserial.write(15);     // command
+  BTserial.write(-17);    // packet crc
+}
+
+void sendResetTrip(void) {
+  sendUnlock();
+
+  delay(200);
+  
+  // sending SEND_ResetDistance
+  BTserial.write(-1);     // 0xff
+  BTserial.write(-1);     // 0xff
+  BTserial.write(1);      // data length
+  BTserial.write(184);    // command
+  BTserial.write(70);     // packet crc
+
+  delay(200);
+
+  sendSaveSettings();
+
+  delay(300);
+
+  sendLock();
+}
+
+void sendResetAh(void) {
+  sendUnlock();
+
+  delay(200);
+
+  // send SEND_ClearCurrentAH command
+  BTserial.write(-1);     // 0xff
+  BTserial.write(-1);     // 0xff
+  BTserial.write(1);      // data length
+  BTserial.write(108);    // command
+  BTserial.write(-110);   // packet crc
+
+  delay(200);
+
+  sendSaveSettings();
+
+  delay(300);
+
+  sendLock();
+}
+
+void sendStartCharge(void) {
+  sendUnlock();
+
+  delay(200);
+
+  // send SEND_ChagerViaMotorOn command
+  BTserial.write(-1);     // 0xff
+  BTserial.write(-1);     // 0xff
+  BTserial.write(2);      // data length
+  BTserial.write(254);    // NEW_CMD byte
+  BTserial.write(66);     // SEND_ChagerViaMotorOn
+  BTserial.write(-68);    // packet crc
+
+  delay(200);
+
+  sendLock();
+}
+
+void sendStopCharge(void) {
+  sendUnlock();
+
+  delay(200);
+
+  // send SEND_ChagerViaMotorOff command
+  BTserial.write(-1);     // 0xff
+  BTserial.write(-1);     // 0xff
+  BTserial.write(2);      // data length
+  BTserial.write(254);    // NEW_CMD byte
+  BTserial.write(67);     // SEND_ChagerViaMotorOff
+  BTserial.write(-69);    // packet crc
+
+  delay(200);
+
+  sendLock();
 }
 
 void showDate() {
