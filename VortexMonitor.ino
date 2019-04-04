@@ -91,6 +91,35 @@ AsyncWebServer server(80);
 CurrentData currentData;
 Label labels;
 
+NexDSButton chargeModeButton = NexDSButton(3, 2, "chargeMode");
+NexButton saveSettingsButton = NexButton(3, 5, "saveSettings");
+NexTouch *nex_listen_list[] = 
+{
+    &chargeModeButton,
+    &saveSettingsButton,
+    NULL
+};
+
+void notFound(AsyncWebServerRequest *request) {
+    request->send(404, "text/plain", "Not found");
+}
+
+void chargeModeCallback(void *ptr) {
+  uint32_t state;
+  chargeModeButton.getValue(&state);
+  
+  if(state) {
+    Serial.println("Charge mode - ON");
+  }
+  else {
+    Serial.println("Charge mode - OFF");
+  }
+}
+
+void saveSettingsCallback(void *ptr) {
+  Serial.println("Save setting");
+}
+
 void setup(void)
 {
     Serial.begin(SerialBaudRate);
@@ -99,6 +128,10 @@ void setup(void)
     cfg.begin("vortex", false);
 
     nexInit();
+    chargeModeButton.attachPop(chargeModeCallback, &chargeModeButton);
+    chargeModeButton.attachPush(chargeModeCallback, &chargeModeButton);
+    saveSettingsButton.attachPop(saveSettingsCallback, &saveSettingsButton);
+    
     labels.splash.show();
     labels.version.setText(VERSION);
     labels.status.setText("Starting up WiFi AP...");
@@ -145,9 +178,18 @@ void setup(void)
         request->send(200, "text/plain", "Hello, world");
     });
 
+    xTaskCreatePinnedToCore(
+                  coreTask,   /* Function to implement the task */
+                  "coreTask", /* Name of the task */
+                  10000,      /* Stack size in words */
+                  NULL,       /* Task input parameter */
+                  0,          /* Priority of the task */
+                  NULL,       /* Task handle. */
+                  1);         /* Core where the task should run */
+
     voltageInROM = cfg.getUInt("voltage", 0);
     
-    // set it for first launch
+    // set it for the first launch
     //RTC.writeEN(true);
     //setTime(21, 01, 00, 26, 2, 2019); // hh:mm:ss dd:mm:yyyy
     //RTC.set(now());
@@ -176,192 +218,196 @@ void setup(void)
     server.onNotFound(notFound);
     server.begin();
 
-    labels.status.setText("Reseting trip...");
-
-    sendResetTrip();
-
     labels.status.setText("Waiting for data packet...");
 }
 
-void notFound(AsyncWebServerRequest *request) {
-    request->send(404, "text/plain", "Not found");
+void coreTask( void * pvParameters ){  
+  for(;;) {
+    nexLoop(nex_listen_list);
+    ArduinoOTA.handle();
+    delay(5);
+  }
 }
 
-void loop(void) { 
-  ArduinoOTA.handle();
-   
-  showDate();
-
-  delay(200);
+void loop(void) {    
+    showDate();
   
-  // sending TrmRequest (request controller for data)
-  BTserial.write(-1);     // 0xff
-  BTserial.write(-1);     // 0xff
-  BTserial.write(1);      // data length
-  BTserial.write(113);    // command
-  BTserial.write(-115);   // packet crc
-
-  while(BTserial.available()) {
-    data = BTserial.read();
-  
-    if(data == 0xFF && prevData == 0xFF) {
-      byte packetLength = BTserial.read();
-      byte packetType = BTserial.read();
-  
-      // data packet (5)
-      if(packetType == 5) {
-        memset(packetData, 0, sizeof(packetData));
-        pindex = 0;
+    delay(200);
     
-        // reading response data packet
-        // packet structure described below code
-        
-        // we are waiting for all data comes to RX
-        while(BTserial.available() < packetLength-1) {
-          delay(5);
-        }
-
-        while(pindex < packetLength-1) { // length = type byte + dataBytes[n]
-          packetData[pindex] = BTserial.read();
-          pindex++;
-        }
-
-        int crc = BTserial.read();
-        int calcCrc = calculateCRC(packetType, packetLength, packetData, crc);
-
-        if(crc != calcCrc) {
-          Serial.println(F("Bad packet"));
-          noData++;
-          continue;
-        }
-
-        if(!initialized) {
-          if(firstRun) {
-            firstRun = false; // do this check only once at startup
-            byte batteryVoltage = ((float)(packetData[38] + (packetData[39] << 8)) / 10);
-
-            Serial.print(F("Current voltage is: "));
-            Serial.println(batteryVoltage);
-            Serial.print(F("Remembered voltage is: "));
-            Serial.println(voltageInROM);
+    // sending TrmRequest (request controller for data)
+    BTserial.write(-1);     // 0xff
+    BTserial.write(-1);     // 0xff
+    BTserial.write(1);      // data length
+    BTserial.write(113);    // command
+    BTserial.write(-115);   // packet crc
   
-            // if previous remembered battery voltage lower than current value
-            // we suppose that the battery was recharged
-            // So we reset Ah counters and store new value in EEPROM
-            if(voltageInROM < batteryVoltage) {
-              Serial.println(F("Reseting Ah counters"));
-              labels.status.setText("Reseting Ah counters...");
-              
-              delay(500);
-              sendResetAh();
-            }
-
+    while(BTserial.available()) {
+      data = BTserial.read();
+    
+      if(data == 0xFF && prevData == 0xFF) {
+        byte packetLength = BTserial.read();
+        byte packetType = BTserial.read();
+    
+        // data packet (5)
+        if(packetType == 5) {
+          memset(packetData, 0, sizeof(packetData));
+          pindex = 0;
+      
+          // reading response data packet
+          // packet structure described below code
+          
+          // we are waiting for all data comes to RX
+          while(BTserial.available() < packetLength-1) {
+            delay(5);
+          }
+  
+          while(pindex < packetLength-1) { // length = type byte + dataBytes[n]
+            packetData[pindex] = BTserial.read();
+            pindex++;
+          }
+  
+          int crc = BTserial.read();
+          int calcCrc = calculateCRC(packetType, packetLength, packetData, crc);
+  
+          if(crc != calcCrc) {
+            Serial.println(F("Bad packet"));
+            noData++;
+            continue;
+          }
+  
+          if(!initialized) {
+            if(firstRun) {
+              firstRun = false; // do this check only once at startup
+              byte batteryVoltage = ((float)(packetData[38] + (packetData[39] << 8)) / 10);
+              float distance = (float)(round(100 * (((((long)packetData[158]) + (((long)packetData[159]) << 8) + (((long)packetData[160]) << 16) + (((long)packetData[161]) << 24)) / ((float)99.9)) / 1000)) / 100);
+  
+              Serial.print(F("Current voltage is: "));
+              Serial.println(batteryVoltage);
+              Serial.print(F("Remembered voltage is: "));
+              Serial.println(voltageInROM);
+    
+              // if previous remembered battery voltage lower than current value
+              // we suppose that the battery was recharged
+              // So we reset Ah counters and store new value in EEPROM
+              if(voltageInROM < batteryVoltage) {
+                Serial.println(F("Reseting Ah counters"));
+                labels.status.setText("Reseting Ah counters...");
+                
+                delay(500);
+                sendResetAh();
+              }
+  
               voltageInROM = batteryVoltage;
               cfg.putUInt("voltage", voltageInROM);
               cfg.end();
+
+              if(distance > 0) {
+                labels.status.setText("Reseting trip...");
+                sendResetTrip();
+              }
+            }
+            
+            setupScreen();
+            initialized = true;
           }
-          
-          setupScreen();
-          initialized = true;
-        }
-    
-        if(noData > 0) {
-          noData = 0;
-        }
       
-        currentData.speed = packetData[185] + (packetData[186] << 8);
-        currentData.voltage = ((float)(packetData[38] + (packetData[39] << 8)) / 10);
-        currentData.tempCont = ((float)(packetData[32] + (packetData[33] << 8))) / 10;
-        currentData.tempEngine = ((float)(packetData[34] + (packetData[35] << 8))) / 10;
-        currentData.ah = (float)(((((float)((long)packetData[83]) + (((long)(packetData[84])) << 8) + (((long)(packetData[85])) << 16) + (((long)(packetData[86])) << 24)) / 36000) * 134) / 1000);
-        currentData.ahRegen = (float)(((((float)((long)packetData[87]) + (((long)(packetData[88])) << 8) + (((long)(packetData[89])) << 16) + (((long)(packetData[90])) << 24)) / 36000) * 134) / 1000);
-        currentData.distance = (float)(round(100 * (((((long)packetData[158]) + (((long)packetData[159]) << 8) + (((long)packetData[160]) << 16) + (((long)packetData[161]) << 24)) / ((float)99.9)) / 1000)) / 100);
-        currentData.odometer = (float)(round(100 * (((((long)packetData[26]) + (((long)packetData[27]) << 8) + (((long)packetData[28]) << 16) + (((long)packetData[29]) << 24)) / ((float)99.9)) / 1000)) / 100);
-
-        // FIXME! skip negative current (problem with second byte)
-        if((packetData[21] << 8) > 64000) {
-          currentData.current = 0.0;
-          regen = true;
-        } else {
-          currentData.current = ((float)((packetData[20] + (packetData[21] << 8))) * ((float)134)) / ((float)1000);
-        }
-
-        static char speed[1];
-        dtostrf(currentData.speed, 2, 0, speed);
-        labels.speed.setText(speed);
-
-        static char voltage[4];
-        dtostrf(currentData.voltage, 5, 2, voltage);
-        labels.voltage.setText(voltage);
-        
-        static char current[5];
-
-        if(regen) {// FIXME! regen
-          labels.current.setText("regen");
-        }
-        else {
-          regen = false;
-          
-          if(currentData.current > 100) {
-            dtostrf(currentData.current, 6, 0, current);
-          } else {
-            dtostrf(currentData.current, 6, 2, current);
+          if(noData > 0) {
+            noData = 0;
           }
-          labels.current.setText(current);
-        }
-
-        static char tempCont[5];
-        dtostrf(currentData.tempCont, 6, 1, tempCont);
-        labels.tempCont.setText(tempCont);
-
-        static char tempEngine[5];
-        dtostrf(currentData.tempEngine, 6, 1, tempEngine);
-        labels.tempEngine.setText(tempEngine);
-
-        static char ah[4];
-        dtostrf(fabs(currentData.ah), 5, 1, ah);
-        labels.ah.setText(ah);
-
-        static char ahRegen[4];
-        dtostrf(fabs(currentData.ahRegen), 5, 1, ahRegen);
-        labels.ahRegen.setText(ahRegen);
-
-        static char distance[6];
-        static char distanceKm[9];
-        dtostrf(currentData.distance, 7, 2, distance);
-        sprintf(distanceKm,"%s km", distance);
-        labels.distance.setText(distanceKm);
-
-        static char odometer[6];
-        static char odometerKm[9];
-        dtostrf(currentData.odometer, 7, 0, odometer);
-        sprintf(odometerKm,"%s km", odometer);
-        labels.odometer.setText(odometerKm);
-
-        if(!regen) {
-          static char power[4];
-          dtostrf(currentData.voltage * currentData.current, 5, 0, power);
-          labels.power.setText(power);
-        } else {
-          labels.power.setText("----");
-        }
-
-        labels.ahBar.setValue(100 - (fabs(ah - ahRegen) / (BATTERY_CAPACITY / 100)));
-      }
-    }
         
-    prevData = data;
-  }
-
-  if(noData > 10 && initialized) {
-   setupNoDataScreen();
-   labels.status.setText("Waiting for data from controller...");
-   initialized = false;
-  }
-    
-  if(initialized) {
-    noData++;
-  }
+          currentData.speed = packetData[185] + (packetData[186] << 8);
+          currentData.voltage = ((float)(packetData[38] + (packetData[39] << 8)) / 10);
+          currentData.tempCont = ((float)(packetData[32] + (packetData[33] << 8))) / 10;
+          currentData.tempEngine = ((float)(packetData[34] + (packetData[35] << 8))) / 10;
+          currentData.ah = (float)(((((float)((long)packetData[83]) + (((long)(packetData[84])) << 8) + (((long)(packetData[85])) << 16) + (((long)(packetData[86])) << 24)) / 36000) * 134) / 1000);
+          currentData.ahRegen = (float)(((((float)((long)packetData[87]) + (((long)(packetData[88])) << 8) + (((long)(packetData[89])) << 16) + (((long)(packetData[90])) << 24)) / 36000) * 134) / 1000);
+          currentData.distance = (float)(round(100 * (((((long)packetData[158]) + (((long)packetData[159]) << 8) + (((long)packetData[160]) << 16) + (((long)packetData[161]) << 24)) / ((float)99.9)) / 1000)) / 100);
+          currentData.odometer = (float)(round(100 * (((((long)packetData[26]) + (((long)packetData[27]) << 8) + (((long)packetData[28]) << 16) + (((long)packetData[29]) << 24)) / ((float)99.9)) / 1000)) / 100);
+  
+          // FIXME! skip negative current (problem with second byte)
+          if((packetData[21] << 8) > 64000) {
+            currentData.current = 0.0;
+            regen = true;
+          } else {
+            currentData.current = ((float)((packetData[20] + (packetData[21] << 8))) * ((float)134)) / ((float)1000);
+          }
+  
+          static char speed[1];
+          dtostrf(currentData.speed, 2, 0, speed);
+          labels.speed.setText(speed);
+  
+          static char voltage[4];
+          dtostrf(currentData.voltage, 5, 2, voltage);
+          labels.voltage.setText(voltage);
+          
+          static char current[5];
+  
+          if(regen) {// FIXME! regen
+            labels.current.setText("regen");
+          }
+          else {
+            regen = false;
+            
+            if(currentData.current > 100) {
+              dtostrf(currentData.current, 6, 0, current);
+            } else {
+              dtostrf(currentData.current, 6, 2, current);
+            }
+            labels.current.setText(current);
+          }
+  
+          static char tempCont[5];
+          dtostrf(currentData.tempCont, 6, 1, tempCont);
+          labels.tempCont.setText(tempCont);
+  
+          static char tempEngine[5];
+          dtostrf(currentData.tempEngine, 6, 1, tempEngine);
+          labels.tempEngine.setText(tempEngine);
+  
+          static char ah[4];
+          dtostrf(fabs(currentData.ah), 5, 1, ah);
+          labels.ah.setText(ah);
+  
+          static char ahRegen[4];
+          dtostrf(fabs(currentData.ahRegen), 5, 1, ahRegen);
+          labels.ahRegen.setText(ahRegen);
+  
+          static char distance[6];
+          static char distanceKm[9];
+          dtostrf(currentData.distance, 7, 2, distance);
+          sprintf(distanceKm,"%s km", distance);
+          labels.distance.setText(distanceKm);
+  
+          static char odometer[6];
+          static char odometerKm[9];
+          dtostrf(currentData.odometer, 7, 0, odometer);
+          sprintf(odometerKm,"%s km", odometer);
+          labels.odometer.setText(odometerKm);
+  
+          if(!regen) {
+            static char power[4];
+            dtostrf(currentData.voltage * currentData.current, 5, 0, power);
+            labels.power.setText(power);
+          } else {
+            labels.power.setText("----");
+          }
+  
+          labels.ahBar.setValue(100 - (fabs(ah - ahRegen) / (BATTERY_CAPACITY / 100)));
+        }
+      }
+          
+      prevData = data;
+    }
+  
+    if(noData > 10 && initialized) {
+     setupNoDataScreen();
+     labels.status.setText("Waiting for data from controller...");
+     initialized = false;
+    }
+      
+    if(initialized) {
+      noData++;
+    }
 }
 
 byte calculateCRC(int type, int plength, int *data, int crc) {
@@ -417,7 +463,7 @@ void sendSaveSettings(void) {
 void sendResetTrip(void) {
   sendUnlock();
 
-  delay(200);
+  delay(1500);
   
   // sending SEND_ResetDistance
   BTserial.write(-1);     // 0xff
@@ -426,11 +472,11 @@ void sendResetTrip(void) {
   BTserial.write(184);    // command
   BTserial.write(70);     // packet crc
 
-  delay(200);
+  delay(2000);
 
   sendSaveSettings();
 
-  delay(300);
+  delay(2000);
 
   sendLock();
 }
@@ -438,7 +484,7 @@ void sendResetTrip(void) {
 void sendResetAh(void) {
   sendUnlock();
 
-  delay(200);
+  delay(1500);
 
   // send SEND_ClearCurrentAH command
   BTserial.write(-1);     // 0xff
@@ -447,11 +493,11 @@ void sendResetAh(void) {
   BTserial.write(108);    // command
   BTserial.write(-110);   // packet crc
 
-  delay(200);
+  delay(2000);
 
   sendSaveSettings();
 
-  delay(300);
+  delay(2000);
 
   sendLock();
 }
@@ -459,7 +505,7 @@ void sendResetAh(void) {
 void sendStartCharge(void) {
   sendUnlock();
 
-  delay(200);
+  delay(1500);
 
   // send SEND_ChagerViaMotorOn command
   BTserial.write(-1);     // 0xff
@@ -469,7 +515,7 @@ void sendStartCharge(void) {
   BTserial.write(66);     // SEND_ChagerViaMotorOn
   BTserial.write(-68);    // packet crc
 
-  delay(200);
+  delay(1500);
 
   sendLock();
 }
@@ -477,7 +523,7 @@ void sendStartCharge(void) {
 void sendStopCharge(void) {
   sendUnlock();
 
-  delay(200);
+  delay(1500);
 
   // send SEND_ChagerViaMotorOff command
   BTserial.write(-1);     // 0xff
@@ -487,7 +533,7 @@ void sendStopCharge(void) {
   BTserial.write(67);     // SEND_ChagerViaMotorOff
   BTserial.write(-69);    // packet crc
 
-  delay(200);
+  delay(1500);
 
   sendLock();
 }
@@ -500,7 +546,6 @@ void showDate() {
   
   sprintf(dataLabel, "%02d.%02d.%04d", day(), month(), year());
   labels.date.setText(dataLabel);
-  
 }
 
 void setupScreen(void) {
